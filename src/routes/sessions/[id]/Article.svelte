@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { BrainIcon, ChevronDown, ChevronUp, Pencil, RefreshCw, Trash2 } from 'lucide-svelte';
+	import { Brain, ChevronDown, ChevronUp, Pencil, RefreshCw, Trash2 } from 'lucide-svelte';
 	import { quadInOut } from 'svelte/easing';
 	import { slide } from 'svelte/transition';
 
@@ -12,27 +12,69 @@
 	import { type Message } from '$lib/sessions';
 	import { Sitemap } from '$lib/sitemap';
 
-	export let message: Message;
-	export let retryIndex: number | undefined = undefined;
-	export let handleRetry: ((index: number) => void) | undefined = undefined;
-	export let handleEditMessage: ((message: Message) => void) | undefined = undefined;
-	export let handleDeleteAttachment: ((message: Message) => void) | undefined = undefined;
+	import AttachmentImage from './AttachmentImage.svelte';
 
-	let isKnowledgeAttachment: boolean | undefined;
-	let isUserRole: boolean | undefined;
-	let isReasoningVisible: boolean = false;
+	let {
+		message,
+		retryIndex = undefined,
+		handleRetry = undefined,
+		handleEditMessage = undefined,
+		handleDeleteAttachment = undefined,
+		isStreamingArticle = false,
+		currentRawReasoning,
+		currentRawCompletion
+	}: {
+		message: Message;
+		retryIndex?: number;
+		handleRetry?: (index: number) => void;
+		handleEditMessage?: (message: Message) => void;
+		handleDeleteAttachment?: (message: Message) => void;
+		isStreamingArticle?: boolean;
+		currentRawReasoning?: string;
+		currentRawCompletion?: string;
+	} = $props();
 
-	$: if (message) {
-		isKnowledgeAttachment = message.knowledge?.name !== undefined;
-		isUserRole = message.role === 'user' && !isKnowledgeAttachment;
+	const isKnowledgeAttachment = $derived(message.knowledge?.name !== undefined);
+	const isUserRole = $derived(message.role === 'user' && !isKnowledgeAttachment);
+	let isReasoningVisible = $state(false);
+	let userHasInteractedWithToggle = $state(false);
+
+	function toggleReasoningVisibility() {
+		isReasoningVisible = !isReasoningVisible;
+		userHasInteractedWithToggle = true;
 	}
+
+	$effect(() => {
+		if (isStreamingArticle && !userHasInteractedWithToggle) {
+			const hasReasoning = currentRawReasoning && currentRawReasoning.trim() !== '';
+			const hasCompletion = currentRawCompletion && currentRawCompletion.trim() !== '';
+
+			if (hasReasoning && !hasCompletion) {
+				isReasoningVisible = true;
+			} else if (hasCompletion) {
+				isReasoningVisible = false;
+			}
+		}
+	});
+
+	// Reset user interaction state if this component instance is reused for a non-streaming to streaming transition
+	// or if the message fundamentally changes, indicating a new context.
+	$effect(() => {
+		if (!isStreamingArticle) {
+			userHasInteractedWithToggle = false;
+			// Also ensure reasoning is collapsed for non-streaming articles by default unless it already has content
+			if (!message.reasoning || message.reasoning.trim() === '') {
+				isReasoningVisible = false;
+			}
+		}
+	});
 </script>
 
 {#if isKnowledgeAttachment}
 	<article class="attachment">
 		<div class="attachment__content">
 			<div class="attachment__icon">
-				<BrainIcon class="base-icon" />
+				<Brain class="base-icon" />
 			</div>
 			<div class="attachment__name">
 				<Button variant="link" href={generateNewUrl(Sitemap.KNOWLEDGE, message.knowledge?.id)}>
@@ -43,7 +85,7 @@
 		<div class="attachment__interactive">
 			<Button
 				variant="icon"
-				on:click={() => handleDeleteAttachment && handleDeleteAttachment(message)}
+				onclick={() => handleDeleteAttachment && handleDeleteAttachment(message)}
 			>
 				<Trash2 class="base-icon" />
 			</Button>
@@ -69,7 +111,7 @@
 						title={$LL.retry()}
 						variant="icon"
 						id="retry-index-{retryIndex}"
-						on:click={() => handleRetry && handleRetry(retryIndex)}
+						onclick={() => handleRetry && handleRetry(retryIndex)}
 					>
 						<RefreshCw class="base-icon" />
 					</Button>
@@ -78,7 +120,7 @@
 					<Button
 						title={$LL.edit()}
 						variant="icon"
-						on:click={() => handleEditMessage && handleEditMessage(message)}
+						onclick={() => handleEditMessage && handleEditMessage(message)}
 					>
 						<Pencil class="base-icon" />
 					</Button>
@@ -89,10 +131,7 @@
 
 		{#if message.reasoning}
 			<div class="reasoning" transition:slide={{ easing: quadInOut, duration: 200 }}>
-				<button
-					class="reasoning__button"
-					on:click={() => (isReasoningVisible = !isReasoningVisible)}
-				>
+				<button class="reasoning__button" onclick={toggleReasoningVisibility}>
 					{$LL.reasoning()}
 					{#if isReasoningVisible}
 						<ChevronUp class="base-icon" />
@@ -112,6 +151,13 @@
 		{/if}
 		{#if message.content}
 			<Markdown markdown={message.content} />
+		{/if}
+		{#if message.images && message.images.length}
+			<div class="article__images">
+				{#each message.images as img (img.filename)}
+					<AttachmentImage dataUrl={`data:image/png;base64,${img.data}`} name={img.filename} />
+				{/each}
+			</div>
 		{/if}
 	</article>
 {/if}
@@ -183,5 +229,9 @@
 
 	.reasoning__button {
 		@apply flex w-full items-center justify-between gap-2 p-2;
+	}
+
+	.article__images {
+		@apply mt-2 flex flex-wrap gap-1;
 	}
 </style>
